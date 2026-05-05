@@ -636,7 +636,23 @@ class IronDomeDashboard:
 
             self._update_threat_table()
 
-            if all_done:
+            early_complete = True
+            if not rockets_copy:
+                early_complete = False
+            for r in rockets_copy:
+                if not r.get('assessed'):
+                    early_complete = False
+                    break
+                if r.get('threat') and not r.get('done'):
+                    early_complete = False
+                    break
+                if r.get('interceptor') and not r.get('done'):
+                    early_complete = False
+                    break
+
+            if all_done or early_complete:
+                self.btn_fire.disabled = True
+                self._append_log("THREATS NEUTRALIZED. SALVO COMPLETE.")
                 self._show_scoring()
                 self.running = False
                 break
