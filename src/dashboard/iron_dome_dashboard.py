@@ -288,24 +288,26 @@ class IronDomeDashboard:
         missiles_used = sum(1 for r in self.rockets if r.get('interceptor'))
         destroyed = self.destroyed_counter
         
-        # Collect altitudes and times
+        # Collect altitudes and distances
         altitudes = []
-        temps = []
+        distances = []
         for r in self.rockets:
             if r.get('interceptor') and r['interceptor'].get('intercepte'):
-                altitudes.append(r['interceptor']['missile_y'][-1])
-                temps.append(r['interceptor']['temps_interception'])
+                int_data = r['interceptor']
+                altitudes.append(int_data['missile_y'][-1])
+                dist = np.sqrt(int_data['missile_x'][-1]**2 + int_data['missile_y'][-1]**2 + int_data['missile_z'][-1]**2)
+                distances.append(dist)
                 
         taux_interception = (destroyed / total_threats * 100) if total_threats > 0 else (100.0 if destroyed == 0 else 0.0)
         efficacite = (destroyed / max(missiles_used, 1)) * 100
         alt_moy = np.mean(altitudes) if altitudes else 0
-        temps_moy = np.mean(temps) if temps else 0
+        dist_moy = np.mean(distances) if distances else 0
         
         s = 0
         s += min(taux_interception, 100) * 0.4
         s += efficacite * 0.2
         s += min(alt_moy / 1000, 1) * 100 * 0.2
-        s += max(0, (1 - temps_moy / 30)) * 100 * 0.2
+        s += min(dist_moy / 5000, 1) * 100 * 0.2  # Reward for far interception (max at 5km)
         score_global = round(s, 1)
         
         color = self.C_SUCCESS if score_global >= 80 else (self.C_WARNING if score_global >= 50 else self.C_DANGER)
@@ -318,7 +320,7 @@ class IronDomeDashboard:
                     Ignored: <span style='color: {self.C_SUCCESS};'>{ignored}</span> | 
                     Missiles Fired: <span style='color: {self.C_ACCENT};'>{missiles_used}</span> | 
                     Destroyed: <span style='color: {self.C_SUCCESS}; font-weight:bold;'>{destroyed}</span><br>
-                    <span style='color: {self.C_MUTED}; font-size: 11px;'>Avg Alt: {alt_moy:.0f}m | Avg Time: {temps_moy:.1f}s | Efficiency: {efficacite:.0f}%</span>
+                    <span style='color: {self.C_MUTED}; font-size: 11px;'>Avg Alt: {alt_moy:.0f}m | Avg Dist: {dist_moy:.0f}m | Efficiency: {efficacite:.0f}%</span>
                 </div>
             </div>
             <div style='text-align: right;'>
