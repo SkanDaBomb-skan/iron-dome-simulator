@@ -238,7 +238,7 @@ class EngagementManager:
 
 class EngagementManager3D:
     def __init__(self, zone_x_min, zone_x_max, zone_z_min, zone_z_max,
-                 interceptor_pos=(0, 0, 0), missile_vitesse=800, kill_radius=30):
+                 interceptor_pos=(0, 0, 0), missile_vitesse=800, kill_radius=30, stock_missiles=10):
         self.zone_x_min = zone_x_min
         self.zone_x_max = zone_x_max
         self.zone_z_min = zone_z_min
@@ -246,106 +246,105 @@ class EngagementManager3D:
         self.interceptor_pos = interceptor_pos
         self.missile_vitesse = missile_vitesse
         self.kill_radius = kill_radius
+        self.stock_missiles = stock_missiles
 
     def impact_dans_zone(self, x_impact, z_impact):
         return (self.zone_x_min <= x_impact <= self.zone_x_max and
                 self.zone_z_min <= z_impact <= self.zone_z_max)
 
+    def calculer_score_priorite(self, tc, xc, yc, zc, alpha=1.0, beta=1.0):
+        tti = tc[-1]
+        x_c = (self.zone_x_min + self.zone_x_max) / 2
+        z_c = (self.zone_z_min + self.zone_z_max) / 2
+        d_epi = np.sqrt((xc[-1] - x_c)**2 + (zc[-1] - z_c)**2)
+        r_defense = np.sqrt(((self.zone_x_max - self.zone_x_min)/2)**2 + ((self.zone_z_max - self.zone_z_min)/2)**2)
+        
+        if tti <= 0: tti = 0.01
+        if r_defense <= 0: r_defense = 1.0
+        
+        sp = alpha * (1.0 / tti) + beta * (1.0 - d_epi / r_defense)
+        return sp
+
     def gerer_salve(self, salve):
         resultats = []
         missiles_utilises = 0
         interceptions = 0
-        ignorees = 0
+        ignorees_hors_zone = 0
+        echecs_manque_missiles = 0
 
+        # Phase 1 : Evaluation TEWA
+        menaces_evaluees = []
         for roquette in salve:
             tc, xc, yc, zc = roquette.trajectoire_rk4(dt=0.1)
             dans_zone = self.impact_dans_zone(xc[-1], zc[-1])
-
+            
             if dans_zone:
+                sp = self.calculer_score_priorite(tc, xc, yc, zc)
+                menaces_evaluees.append({
+                    'roquette': roquette,
+                    'trajectoire': (tc, xc, yc, zc),
+                    'dans_zone': True,
+                    'score_sp': sp
+                })
+            else:
+                ignorees_hors_zone += 1
+                resultats.append({
+                    'roquette': roquette,
+                    'trajectoire': (tc, xc, yc, zc),
+                    'dans_zone': False,
+                    'interception': None,
+                    'statut': 'Ignorée (Hors zone)'
+                })
+
+        # Phase 2 : Tri par priorité
+        menaces_evaluees.sort(key=lambda x: x['score_sp'], reverse=True)
+
+        # Phase 3 : Engagement
+        for menace in menaces_evaluees:
+            roquette = menace['roquette']
+            tc, xc, yc, zc = menace['trajectoire']
+            
+            if self.stock_missiles > 0:
+                self.stock_missiles -= 1
+                missiles_utilises += 1
+                
                 missile = Interceptor3D(
                     *self.interceptor_pos,
                     vitesse=self.missile_vitesse,
                     kill_radius=self.kill_radius
                 )
                 r = missile.proportional_navigation_3d(xc, yc, zc, tc)
-                missiles_utilises += 1
+                
                 if r['intercepte']:
                     interceptions += 1
+                    
                 resultats.append({
                     'roquette': roquette,
                     'trajectoire': (tc, xc, yc, zc),
                     'dans_zone': True,
-                    'interception': r
+                    'interception': r,
+                    'score_sp': menace['score_sp'],
+                    'statut': 'Engagée'
                 })
             else:
-                ignorees += 1
-                resultats.append({
-                    'roquette': roquette,
-                    'trajectoire': (tc, xc, yc, zc),
-                    'dans_zone': False,
-                    'interception': None
-                })
-
-        return {
-            'details': resultats, 'total': len(salve),
-            'dangereuses': missiles_utilises, 'ignorees': ignorees,
-            'interceptions': interceptions,
-            'taux': interceptions / max(missiles_utilises, 1) * 100
-        }
-
-class EngagementManager3D:
-    def __init__(self, zone_x_min, zone_x_max, zone_z_min, zone_z_max,
-                 interceptor_pos=(0, 0, 0), missile_vitesse=800, kill_radius=30):
-        self.zone_x_min = zone_x_min
-        self.zone_x_max = zone_x_max
-        self.zone_z_min = zone_z_min
-        self.zone_z_max = zone_z_max
-        self.interceptor_pos = interceptor_pos
-        self.missile_vitesse = missile_vitesse
-        self.kill_radius = kill_radius
-
-    def impact_dans_zone(self, x_impact, z_impact):
-        return (self.zone_x_min <= x_impact <= self.zone_x_max and
-                self.zone_z_min <= z_impact <= self.zone_z_max)
-
-    def gerer_salve(self, salve):
-        resultats = []
-        missiles_utilises = 0
-        interceptions = 0
-        ignorees = 0
-
-        for roquette in salve:
-            tc, xc, yc, zc = roquette.trajectoire_rk4(dt=0.1)
-            dans_zone = self.impact_dans_zone(xc[-1], zc[-1])
-
-            if dans_zone:
-                missile = Interceptor3D(
-                    *self.interceptor_pos,
-                    vitesse=self.missile_vitesse,
-                    kill_radius=self.kill_radius
-                )
-                r = missile.proportional_navigation_3d(xc, yc, zc, tc)
-                missiles_utilises += 1
-                if r['intercepte']:
-                    interceptions += 1
+                echecs_manque_missiles += 1
                 resultats.append({
                     'roquette': roquette,
                     'trajectoire': (tc, xc, yc, zc),
                     'dans_zone': True,
-                    'interception': r
-                })
-            else:
-                ignorees += 1
-                resultats.append({
-                    'roquette': roquette,
-                    'trajectoire': (tc, xc, yc, zc),
-                    'dans_zone': False,
-                    'interception': None
+                    'interception': None,
+                    'score_sp': menace['score_sp'],
+                    'statut': 'ECHEC (Manque de missiles)'
                 })
 
+        dangereuses = missiles_utilises + echecs_manque_missiles
         return {
-            'details': resultats, 'total': len(salve),
-            'dangereuses': missiles_utilises, 'ignorees': ignorees,
+            'details': resultats, 
+            'total': len(salve),
+            'dangereuses': dangereuses,
+            'ignorees': ignorees_hors_zone,
+            'manque_missiles': echecs_manque_missiles,
             'interceptions': interceptions,
-            'taux': interceptions / max(missiles_utilises, 1) * 100
+            'missiles_utilises': missiles_utilises,
+            'taux': (interceptions / max(dangereuses, 1)) * 100
         }
