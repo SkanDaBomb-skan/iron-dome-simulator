@@ -26,32 +26,32 @@ class Radar:
 class KalmanFilter:
     """
     Unscented Kalman Filter (UKF) pour suivi et prediction de trajectoire balistique.
-    
+
     Estime dynamiquement le vecteur d'etat [x, y, vx, vy, k] ou k est le 
     coefficient de trainee balistique (drag). L'UKF utilise la propagation
     par points sigma, eliminant le besoin de Jacobiennes et augmentant la
     precision sur la non-linearite du vol.
     """
-    
+
     def __init__(self, sigma_processus=5.0, sigma_mesure=30.0):
         self.g = 9.81
         self.sigma_processus = sigma_processus
         self.sigma_mesure = sigma_mesure
         self.k_drag_init = 0.000086
-        
+
         # Dimensions
         self.n = 5
-        
+
         # Parametres Merwe Scaled Sigma Points
         self.alpha = 1e-3
         self.beta = 2
         self.kappa = 0
         self.lam = self.alpha**2 * (self.n + self.kappa) - self.n
-        
+
         # Poids
         self.Wm = np.zeros(2 * self.n + 1)
         self.Wc = np.zeros(2 * self.n + 1)
-        
+
         self.Wm[0] = self.lam / (self.n + self.lam)
         self.Wc[0] = self.lam / (self.n + self.lam) + (1 - self.alpha**2 + self.beta)
         for i in range(1, 2 * self.n + 1):
@@ -63,7 +63,7 @@ class KalmanFilter:
             U = linalg.cholesky((self.n + self.lam) * P)
         except linalg.LinAlgError:
             U = linalg.cholesky((self.n + self.lam) * (P + np.eye(self.n) * 1e-8))
-            
+
         sigmas = np.zeros((2 * self.n + 1, self.n))
         sigmas[0] = x
         for k in range(self.n):
@@ -82,7 +82,7 @@ class KalmanFilter:
             ax = 0
             ay = -self.g
         return np.array([vx, vy, ax, ay])
-        
+
     def _rk4_step(self, X, dt):
         """Propage l'etat [x, y, vx, vy, k] sur dt via RK4."""
         x, y, vx, vy, k = X
@@ -91,7 +91,7 @@ class KalmanFilter:
         k2 = self._derivees(state + dt/2 * k1, k)
         k3 = self._derivees(state + dt/2 * k2, k)
         k4 = self._derivees(state + dt * k3, k)
-        
+
         new_state = state + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
         return np.array([new_state[0], new_state[1], new_state[2], new_state[3], k])
 
@@ -101,19 +101,19 @@ class KalmanFilter:
 
         dt = t_obs[1] - t_obs[0]
         K_SCALE = 10000.0
-        
+
         # Initialisation robuste pour la Vitesse
         n_init = min(5, len(t_obs))
         vx0 = np.polyfit(t_obs[:n_init], x_obs[:n_init], 1)[0]
         vy0 = np.polyfit(t_obs[:n_init], y_obs[:n_init], 1)[0]
         X = np.array([x_obs[0], y_obs[0], vx0, vy0, self.k_drag_init * K_SCALE])
-        
+
         P = np.diag([
             self.sigma_mesure**2, self.sigma_mesure**2,
             (self.sigma_mesure)**2, (self.sigma_mesure)**2,
             0.5**2
         ])
-        
+
         # On FOCUS sur la vitesse (Q tres petit = vitesse ultra lisse)
         # Et on donne moins d'importance a k (Q tres petit = k ne bouge presque pas)
         sigma_a = 2.0  # La vitesse doit suivre une physique propre
@@ -123,57 +123,57 @@ class KalmanFilter:
             0.01**2  # k est bloque, il n'a pas le droit d'absorber le bruit
         ])
         R = np.eye(2) * self.sigma_mesure**2
-        
+
         etats = []
         for j in range(len(t_obs)):
             # --- PREDICTION UKF ---
             sigmas = self._generer_points_sigma(X, P)
             sigmas_f = np.zeros_like(sigmas)
-            
+
             for i in range(2 * self.n + 1):
                 state_physique = sigmas[i].copy()
                 state_physique[4] /= K_SCALE
-                
+
                 state_pred = self._rk4_step(state_physique, dt)
-                
+
                 state_pred[4] *= K_SCALE
                 sigmas_f[i] = state_pred
-                
+
             X_pred = np.dot(self.Wm, sigmas_f)
-            
+
             P_pred = Q.copy()
             for i in range(2 * self.n + 1):
                 y_diff = sigmas_f[i] - X_pred
                 P_pred += self.Wc[i] * np.outer(y_diff, y_diff)
-                
+
             # --- MISE A JOUR UKF ---
             sigmas_h = np.zeros((2 * self.n + 1, 2))
             for i in range(2 * self.n + 1):
                 sigmas_h[i] = [sigmas_f[i, 0], sigmas_f[i, 1]]
-                
+
             zp = np.dot(self.Wm, sigmas_h)
-            
+
             S = R.copy()
             for i in range(2 * self.n + 1):
                 y_diff = sigmas_h[i] - zp
                 S += self.Wc[i] * np.outer(y_diff, y_diff)
-                
+
             Pxz = np.zeros((self.n, 2))
             for i in range(2 * self.n + 1):
                 Pxz += self.Wc[i] * np.outer(sigmas_f[i] - X_pred, sigmas_h[i] - zp)
-                
+
             K_gain = np.dot(Pxz, linalg.inv(S))
             z_obs = np.array([x_obs[j], y_obs[j]])
-            
+
             X = X_pred + np.dot(K_gain, z_obs - zp)
             P = P_pred - np.dot(K_gain, np.dot(S, K_gain.T))
-            
+
             X[4] = np.clip(X[4], 0.1, 8.0)
-            
+
             etat = X.copy()
             etat[4] = etat[4] / K_SCALE
             etats.append(etat)
-            
+
         return np.array(etats)
 
     def _simuler_trajectoire(self, etat, force_k=None, dt=0.01):
@@ -182,10 +182,10 @@ class KalmanFilter:
         else:
             x, y, vx, vy = etat
             k = self.k_drag_init
-            
+
         if force_k is not None:
             k = force_k
-            
+
         state = np.array([x, y, vx, vy], dtype=float)
         preds = [state.copy()]
 
@@ -194,7 +194,7 @@ class KalmanFilter:
             k2 = self._derivees(state + dt/2 * k1, k)
             k3 = self._derivees(state + dt/2 * k2, k)
             k4 = self._derivees(state + dt * k3, k)
-            
+
             new_state = state + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
 
             if new_state[1] < 0 and state[1] >= 0:
@@ -202,10 +202,10 @@ class KalmanFilter:
                 x_impact = state[0] + frac * (new_state[0] - state[0])
                 preds.append(np.array([x_impact, 0, 0, 0]))
                 break
-            
+
             state = new_state
             preds.append(state.copy())
-            
+
             if state[1] < -100:
                 break
 
