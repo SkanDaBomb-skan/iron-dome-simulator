@@ -94,14 +94,14 @@ class UKF3D:
         P = np.diag([
             self.sm**2, self.sm**2, self.sm**2,
             self.sm**2, self.sm**2, self.sm**2,
-            0.5**2
+            0.3**2
         ])
 
         sigma_a = 2.0
         Q = np.diag([
             (0.5*sigma_a*dt**2)**2, (0.5*sigma_a*dt**2)**2, (0.5*sigma_a*dt**2)**2,
             (sigma_a*dt)**2, (sigma_a*dt)**2, (sigma_a*dt)**2,
-            0.01**2
+            0.001**2
         ])
 
         etats = []
